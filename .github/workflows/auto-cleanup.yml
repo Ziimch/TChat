@@ -1,0 +1,27 @@
+name: TChat Database Auto Cleanup
+​Kapan robot ini berjalan?
+​on:
+schedule:
+# Berjalan setiap hari pada jam 00:00 UTC (sekitar jam 07:00 pagi WIB)
+- cron: '0 0 * * *'
+​Tombol manual (memungkinkan Anda memencet tombol "Run workflow" di GitHub)
+​workflow_dispatch:
+​jobs:
+cleanup-job:
+runs-on: ubuntu-latest
+​steps:
+- name: 📥 Download kode dari repository
+uses: actions/checkout@v3
+​- name: ⚙️ Setup NodeJS
+uses: actions/setup-node@v3
+with:
+node-version: '18'
+​- name: 📦 Install Firebase Admin
+# Mendownload alat resmi dari Google sebelum menjalankan script
+run: npm install firebase-admin
+​- name: 🧹 Jalankan Script Pembersih
+run: node cleanup.js
+env:
+# Variabel rahasia ini diambil dari pengaturan rahasia GitHub Anda
+FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
