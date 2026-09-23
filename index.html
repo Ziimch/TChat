@@ -1,97 +1,241 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Chat Anonim Real-Time</title>
-<!-- Firebase SDK -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    background: #f2f2f2;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-  }
-  #messages {
-    flex: 1;
-    padding: 10px;
-    overflow-y: auto;
-    background: #fff;
-  }
-  #messages div {
-    margin-bottom: 10px;
-  }
-  #messageForm {
-    display: flex;
-    padding: 10px;
-    background: #ddd;
-  }
-  #messageInput {
-    flex: 1;
-    padding: 8px;
-    font-size: 16px;
-  }
-  #sendBtn {
-    padding: 8px 16px;
-    font-size: 16px;
-    margin-left: 10px;
-  }
-</style>
-</head>
-<body>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>TChat - Global Anonymous Chat</title>
+  
+  <!-- Memuat Tailwind CSS untuk styling yang modern dan cepat -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Font Awesome untuk Icon -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-<h2 style="text-align:center;">TChat</h2>
-<div id="messages"></div>
-<form id="messageForm">
-  <input type="text" id="messageInput" placeholder="Ketik pesan..." autocomplete="off" required />
-  <button type="submit" id="sendBtn">Kirim</button>
-</form>
-
-<script>
-  // Konfigurasi Firebase Anda
-  const firebaseConfig = {
-    apiKey: "AIzaSyBkvcyWuddpddsGmuC5M0w5mzm5v4AIErk",
-    authDomain: "tchatanonim.firebaseapp.com",
-    databaseURL: "https://tchat-83a53.firebaseio.com",
-    projectId: "tchat-83a53",
-    storageBucket: "tchat-83a53.appspot.com",
-    messagingSenderId: "679108429003",
-    appId: "1:679108429003:web:271e5b94ceae3fddeb074e"
-  };
-
-  // Inisialisasi Firebase
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.database();
-
-  const messagesRef = db.ref('messages');
-
-  const messagesDiv = document.getElementById('messages');
-  const messageForm = document.getElementById('messageForm');
-  const messageInput = document.getElementById('messageInput');
-
-  // Menampilkan pesan secara real-time
-  messagesRef.on('child_added', snapshot => {
-    const message = snapshot.val();
-    const messageDiv = document.createElement('div');
-    messageDiv.textContent = message.text;
-    messagesDiv.appendChild(messageDiv);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-  });
-
-  // Mengirim pesan
-  messageForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const text = messageInput.value.trim();
-    if (text !== '') {
-      messagesRef.push({ text: text });
-      messageInput.value = '';
+  <style>
+    /* Kustomisasi scrollbar agar terlihat lebih bersih */
+    ::-webkit-scrollbar {
+      width: 6px;
     }
-  });
-</script>
+    ::-webkit-scrollbar-track {
+      background: transparent; 
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1; 
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8; 
+    }
+    
+    /* Mencegah highlight biru saat di-tap di HP */
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen text-gray-800">
 
+  <!-- Container Utama Aplikasi Chat -->
+  <div class="w-full max-w-md h-[100dvh] sm:h-[90vh] bg-white sm:rounded-3xl sm:shadow-2xl flex flex-col overflow-hidden relative">
+    
+    <!-- Bagian Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md flex items-center justify-between z-10">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center text-blue-600 font-bold text-xl">
+          <i class="fa-solid fa-comments"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight">TChat Global</h1>
+          <p class="text-blue-200 text-xs flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-green-400 inline-block animate-pulse"></span> Online
+          </p>
+        </div>
+      </div>
+      <div id="userBadge" class="bg-blue-700 px-3 py-1 rounded-full text-xs font-medium border border-blue-500">
+        <!-- Nama anonim akan muncul di sini -->
+      </div>
+    </header>
+
+    <!-- Bagian Pesan (Chat Area) -->
+    <main id="messagesArea" class="flex-1 p-4 overflow-y-auto bg-[#f8f9fa] flex flex-col gap-3">
+      <!-- Loading indicator singkat -->
+      <div id="loading" class="text-center text-gray-400 text-sm mt-4">
+        Menghubungkan ke server...
+      </div>
+    </main>
+
+    <!-- Bagian Input Form -->
+    <footer class="bg-white border-t border-gray-200 p-3 z-10">
+      <form id="messageForm" class="flex gap-2 items-end">
+        <div class="flex-1 bg-gray-100 rounded-2xl flex items-center px-4 py-2 border border-gray-200 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-200 transition-all">
+          <input 
+            type="text" 
+            id="messageInput" 
+            class="w-full bg-transparent outline-none text-sm py-1 placeholder-gray-500" 
+            placeholder="Ketik pesan anonim..." 
+            autocomplete="off" 
+            required 
+          />
+        </div>
+        <button 
+          type="submit" 
+          id="sendBtn" 
+          class="bg-blue-600 hover:bg-blue-700 text-white w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/30 transition-transform active:scale-95 disabled:opacity-50">
+          <i class="fa-solid fa-paper-plane ml-[-2px]"></i>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Menggunakan Firebase Modular SDK (V11) agar lebih ringan -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getDatabase, ref, push, onChildAdded, serverTimestamp, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+
+    // Konfigurasi Firebase Anda
+    const firebaseConfig = {
+      apiKey: "AIzaSyBkvcyWuddpddsGmuC5M0w5mzm5v4AIErk",
+      authDomain: "tchatanonim.firebaseapp.com",
+      databaseURL: "https://tchat-83a53.firebaseio.com",
+      projectId: "tchat-83a53",
+      storageBucket: "tchat-83a53.appspot.com",
+      messagingSenderId: "679108429003",
+      appId: "1:679108429003:web:271e5b94ceae3fddeb074e"
+    };
+
+    // Inisialisasi Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const messagesRef = ref(db, 'messages');
+    
+    // BUG FIX 1: Hanya mengambil 50 pesan terakhir agar chat tidak lag saat data di database sudah menumpuk
+    const recentMessagesQuery = query(messagesRef, limitToLast(50));
+
+    // DOM Elements
+    const messagesArea = document.getElementById('messagesArea');
+    const messageForm = document.getElementById('messageForm');
+    const messageInput = document.getElementById('messageInput');
+    const loadingText = document.getElementById('loading');
+    const userBadge = document.getElementById('userBadge');
+    const sendBtn = document.getElementById('sendBtn');
+
+    // BUG FIX 3: Menghasilkan dan menyimpan nama Anonim secara persisten (localStorage)
+    let myUsername = localStorage.getItem('tchat_username');
+    if (!myUsername) {
+      // Membuat nama acak, contoh: Anon-4921
+      myUsername = 'Anon-' + Math.floor(1000 + Math.random() * 9000);
+      localStorage.setItem('tchat_username', myUsername);
+    }
+    userBadge.textContent = myUsername;
+
+    let isFirstMessage = true;
+
+    // Fungsi untuk memformat waktu (HH:MM)
+    function formatTime(timestamp) {
+      // BUG FIX 2: Menangani timestamp yang belum di-resolve oleh server Firebase (berupa object saat baru dikirim)
+      if (!timestamp || typeof timestamp !== 'number') {
+         timestamp = Date.now();
+      }
+      const date = new Date(timestamp);
+      let hours = date.getHours();
+      let minutes = date.getMinutes();
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+
+    // Mendengarkan pesan baru secara real-time
+    onChildAdded(recentMessagesQuery, (snapshot) => {
+      if (isFirstMessage) {
+        loadingText.style.display = 'none'; // Sembunyikan tulisan loading
+        isFirstMessage = false;
+      }
+
+      const data = snapshot.val();
+      const isMine = data.sender === myUsername;
+      const timeString = formatTime(data.timestamp);
+
+      // Membuat elemen bungkus (wrapper) untuk pesan
+      const messageWrapper = document.createElement('div');
+      messageWrapper.className = `flex flex-col max-w-[80%] ${isMine ? 'self-end items-end' : 'self-start items-start'}`;
+
+      // Nama pengirim (hanya tampilkan jika itu orang lain)
+      const senderName = document.createElement('span');
+      senderName.className = 'text-[10px] text-gray-500 mb-1 ml-1';
+      senderName.textContent = isMine ? 'Anda' : (data.sender || 'Anon');
+
+      // Balon pesan (Bubble)
+      const bubble = document.createElement('div');
+      bubble.className = `px-4 py-2 text-sm shadow-sm relative ${
+        isMine 
+          ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' 
+          : 'bg-white text-gray-800 rounded-2xl rounded-tl-sm border border-gray-100'
+      }`;
+      
+      // Mencegah XSS ringan dengan textContent
+      bubble.textContent = data.text;
+
+      // Waktu pesan di bawah balon
+      const timeDiv = document.createElement('span');
+      timeDiv.className = 'text-[10px] text-gray-400 mt-1 mr-1';
+      timeDiv.textContent = timeString;
+
+      // Menyusun elemen ke dalam pembungkus
+      messageWrapper.appendChild(senderName);
+      messageWrapper.appendChild(bubble);
+      messageWrapper.appendChild(timeDiv);
+
+      // Menambahkan animasi masuk
+      messageWrapper.style.opacity = '0';
+      messageWrapper.style.transform = 'translateY(10px)';
+      messageWrapper.style.transition = 'all 0.3s ease';
+
+      messagesArea.appendChild(messageWrapper);
+
+      // Trigger reflow untuk animasi
+      void messageWrapper.offsetWidth; 
+      messageWrapper.style.opacity = '1';
+      messageWrapper.style.transform = 'translateY(0)';
+
+      // Auto-scroll ke bawah setiap ada pesan baru
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+    }, (error) => {
+      // Peringatan jika aturan (Rules) Firebase belum diset menjadi public
+      console.error("Error Realtime DB:", error);
+      loadingText.textContent = "Akses Ditolak. Pastikan Rules Realtime Database diset ke '.read': true, '.write': true";
+      loadingText.className = "text-center text-red-500 text-sm mt-4 font-semibold px-4";
+    });
+
+    // Mengirim pesan
+    messageForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = messageInput.value.trim();
+      
+      if (text !== '') {
+        // Kunci input sementara proses kirim
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        
+        try {
+          await push(messagesRef, { 
+            text: text,
+            sender: myUsername,
+            timestamp: serverTimestamp() // Menggunakan waktu dari server Firebase
+          });
+          messageInput.value = '';
+        } catch (error) {
+          console.error("Gagal mengirim pesan:", error);
+          // Menampilkan pesan error UI yang aman
+          const errorMsg = document.createElement('div');
+          errorMsg.className = 'text-center text-xs text-red-500 my-2';
+          errorMsg.textContent = 'Gagal mengirim pesan. Periksa koneksi Anda.';
+          messagesArea.appendChild(errorMsg);
+        } finally {
+          // Kembalikan tombol seperti semula
+          sendBtn.disabled = false;
+          sendBtn.innerHTML = '<i class="fa-solid fa-paper-plane ml-[-2px]"></i>';
+          messageInput.focus();
+        }
+      }
+    });
+  </script>
 </body>
 </html>
