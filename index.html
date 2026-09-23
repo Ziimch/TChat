@@ -4,13 +4,37 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#111827">
-<title>TChat</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>TChat V5</title>
+<script>
+/* Auto cache-buster: detects a newer deployed version and force-reloads without
+   requiring the user to manually refresh. Bump BUILD_ID on every deploy. */
+(function(){
+  var BUILD_ID = "2026-09-23-r4";
+  try {
+    if (sessionStorage.getItem("tchat_no_redirect")) return;
+    fetch(location.pathname, { cache: "no-store" })
+      .then(function(r){ return r.text(); })
+      .then(function(html){
+        var m = html.match(/BUILD_ID\s*=\s*"([^"]+)"/);
+        if (m && m[1] && m[1] !== BUILD_ID) {
+          sessionStorage.setItem("tchat_no_redirect", "1");
+          location.replace(location.pathname + "?v=" + Date.now());
+        }
+      })
+      .catch(function(){});
+  } catch(e) {}
+})();
+</script>
 <link rel="preconnect" href="https://cdn.tailwindcss.com">
 <link rel="preconnect" href="https://www.gstatic.com">
 <link rel="preconnect" href="https://api.dicebear.com">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -31,9 +55,26 @@ body{font-family:'Inter',sans-serif;overscroll-behavior-y:none;background:radial
 .bubble-other{background:rgba(255,255,255,0.045);border:1px solid rgba(255,255,255,0.06)}
 .emj-btn{background:rgba(255,255,255,0.035);border-radius:9999px;width:30px;height:30px;display:flex;align-items:center;justify-content:center}
 .emj-btn:hover{background:rgba(255,255,255,0.08)}
+.reaction-pop{position:absolute;bottom:100%;right:0;margin-bottom:6px;display:flex;gap:3px;padding:5px 7px;background:rgba(20,24,34,.96);border:1px solid rgba(255,255,255,.1);border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:30}
+.reaction-pop button{width:28px;height:28px;border-radius:999px;font-size:16px}.reaction-pop button:hover{background:rgba(255,255,255,.1)}
+
+.media-tools{display:flex;gap:4px;margin-right:6px}
+.media-btn{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#9ca3af;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);cursor:pointer;transition:.15s}
+.media-btn:hover{color:white;background:rgba(255,255,255,.09)}
+.media-modal{position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;z-index:100}
+.media-modal.show{display:flex}
+.media-card{width:min(92vw,420px);background:#11151e;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.gift-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:12px}
+.gift-item{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);border-radius:14px;padding:9px;cursor:pointer;text-align:center;color:#d1d5db}
+.gift-item:hover{background:rgba(255,255,255,.1);transform:translateY(-1px)}
+.gift-item img{width:48px;height:48px;object-fit:contain;margin:auto}
+.message-media{display:block;max-width:260px;max-height:260px;border-radius:14px;margin-top:3px;object-fit:cover;border:1px solid rgba(255,255,255,.1)}
+.gift-media{width:100px;height:100px;object-fit:contain;display:block;margin:2px auto}
+.media-caption{font-size:11px;opacity:.7;margin-top:5px;word-break:break-all}
+
 </style>
 </head>
-<body class="text-white flex flex-col h-[100dvh] overflow-hidden">
+<body class="text-white flex flex-col h-[100dvh] overflow-hidden" oncontextmenu="return false">
 
 <header class="glass-header px-4 py-3 flex-none flex items-center justify-between z-20 w-full">
   <div class="flex items-center gap-2.5">
@@ -73,6 +114,7 @@ body{font-family:'Inter',sans-serif;overscroll-behavior-y:none;background:radial
   <div id="scrollAnchor" class="h-2 w-full flex-shrink-0"></div>
 </main>
 
+<!-- Jump-to-bottom / unread messages button -->
 <button id="jumpBtn" class="hidden absolute bottom-[128px] right-4 z-20 theme-icon text-white text-xs font-bold rounded-full px-4 py-2.5 shadow-xl items-center gap-2">
   <i class="fa-solid fa-arrow-down"></i>
   <span id="jumpCount">Pesan baru</span>
@@ -102,6 +144,10 @@ body{font-family:'Inter',sans-serif;overscroll-behavior-y:none;background:radial
   </div>
 
   <form id="messageForm" class="flex items-end gap-2 max-w-4xl mx-auto px-1">
+    <div class="media-tools">
+      <button id="imageBtn" type="button" class="media-btn" title="Kirim gambar"><i class="fa-regular fa-image"></i></button>
+      <button id="giftBtn" type="button" class="media-btn" title="Kirim gift"><i class="fa-solid fa-gift"></i></button>
+    </div>
     <div class="flex-1 bg-white/[0.04] border border-white/10 rounded-3xl flex items-center px-4 py-1 transition-all focus-within:border-[var(--thm-bg1)]/60 relative">
       <input type="text" id="messageInput" class="w-full bg-transparent border-none focus:ring-0 text-gray-100 py-2.5 text-[15px] placeholder-gray-500 outline-none pr-9" placeholder="Ketik pesan..." autocomplete="off" maxlength="130" required disabled>
       <span id="charCount" class="absolute right-3 bottom-1.5 text-[9px] text-gray-600 font-mono pointer-events-none">0/130</span>
@@ -110,13 +156,56 @@ body{font-family:'Inter',sans-serif;overscroll-behavior-y:none;background:radial
       <i class="fa-solid fa-paper-plane ml-[-2px] text-lg"></i>
     </button>
   </form>
+
+<div id="mediaModal" class="media-modal" aria-hidden="true">
+  <div class="media-card">
+    <div class="flex items-center justify-between mb-3">
+      <h3 id="mediaTitle" class="text-white font-bold">Kirim gambar</h3>
+      <button id="mediaClose" type="button" class="text-gray-400 hover:text-white text-xl">&times;</button>
+    </div>
+    <div id="imagePanel">
+      <input id="imageUrlInput" type="url" maxlength="500" placeholder="https://contoh.com/gambar.jpg" class="w-full bg-black/20 border border-white/10 rounded-xl px-3 py-3 text-white outline-none">
+      <div id="imagePreviewWrap" class="hidden mt-3">
+        <img id="imagePreview" class="message-media mx-auto" alt="Preview">
+      </div>
+      <button id="imageSendBtn" type="button" class="mt-3 w-full rounded-xl py-2.5 font-bold text-white" style="background:var(--thm-bg1)">Kirim gambar</button>
+      <p class="text-[10px] text-gray-500 mt-2">Gunakan link gambar langsung (JPG, PNG, GIF, WEBP). Gambar tidak disimpan di Realtime Database.</p>
+    </div>
+    <div id="giftPanel" class="hidden">
+      <p class="text-xs text-gray-400">Pilih gift untuk dikirim.</p>
+      <div id="giftGrid" class="gift-grid"></div>
+    </div>
+  </div>
+</div>
+
 </footer>
 
 <script>
-(function(){
+(async function(){
 "use strict";
 
+/* ---------- Block devtools shortcuts (cosmetic only, not real protection) ---------- */
+document.addEventListener("keydown", e => {
+  if (e.key === "F12" || (e.ctrlKey && e.shiftKey && e.key === "I") || (e.ctrlKey && e.key === "u")) {
+    e.preventDefault();
+    return false;
+  }
+});
+
+/* ---------- DOM refs ---------- */
 const chatBox       = document.getElementById("chatBox");
+const mediaModal    = document.getElementById("mediaModal");
+const mediaTitle    = document.getElementById("mediaTitle");
+const mediaClose    = document.getElementById("mediaClose");
+const imageBtn      = document.getElementById("imageBtn");
+const giftBtn       = document.getElementById("giftBtn");
+const imagePanel    = document.getElementById("imagePanel");
+const giftPanel     = document.getElementById("giftPanel");
+const imageUrlInput = document.getElementById("imageUrlInput");
+const imagePreview  = document.getElementById("imagePreview");
+const imagePreviewWrap = document.getElementById("imagePreviewWrap");
+const imageSendBtn  = document.getElementById("imageSendBtn");
+const giftGrid      = document.getElementById("giftGrid");
 const scrollAnchor   = document.getElementById("scrollAnchor");
 const messageForm    = document.getElementById("messageForm");
 const messageInput   = document.getElementById("messageInput");
@@ -133,12 +222,14 @@ const jumpCount      = document.getElementById("jumpCount");
 const replyBox       = document.getElementById("replyBox");
 const replyTxt       = document.getElementById("replyTxt");
 
+/* ---------- Toast (defined early so any early failure can safely use it) ---------- */
 window.sT = function(msg){
   toastEl.textContent = msg;
   toastEl.classList.remove("opacity-0", "translate-y-2");
   setTimeout(() => toastEl.classList.add("opacity-0", "translate-y-2"), 2500);
 };
 
+/* ---------- Notification sound + theme ---------- */
 const pop = new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg");
 let soundOn = true;
 
@@ -170,6 +261,7 @@ document.getElementById("clrBtn").onclick = () => {
   msgStore.clear();
 };
 
+/* ---------- Search ---------- */
 const searchBox = document.getElementById("searchBox");
 const searchInput = document.getElementById("searchInput");
 document.getElementById("searchBtn").onclick = () => {
@@ -189,52 +281,107 @@ searchInput.oninput = () => {
   });
 };
 
+/* ---------- Firebase ---------- */
 const firebaseConfig = {
-  apiKey: "AIzaSyDUh0iYMbtFcxSGiI52F0uf8_nLALdd840",
-  authDomain: "tchat-fe977.firebaseapp.com",
-  databaseURL: "https://tchat-fe977-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "tchat-fe977",
-  storageBucket: "tchat-fe977.firebasestorage.app",
-  messagingSenderId: "448447047829",
-  appId: "1:448447047829:web:1a8f01ce6b393c02a3139c"
+  apiKey: "AIzaSyAC5Hzg9DInPVYJcKTM3bPKXE-OjzpvIGI",
+  authDomain: "tchat-v2-ab202.firebaseapp.com",
+  databaseURL: "https://tchat-v2-ab202-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "tchat-v2-ab202",
+  storageBucket: "tchat-v2-ab202.firebasestorage.app",
+  messagingSenderId: "417009845131",
+  appId: "1:417009845131:web:04d20be9eb471652b1258e"
 };
 
 function showFatalError(title, detail){
-  loadingMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-500 text-3xl mb-3"></i><span class="text-red-400 font-bold px-6 text-center">${title}</span><span class="text-gray-500 text-[11px] px-8 text-center mt-1.5">${detail}</span><button id="retryBtn" class="mt-4 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-full">Coba Lagi</button>`;
+  loadingMsg.innerHTML = `
+    <i class="fa-solid fa-triangle-exclamation text-red-500 text-3xl mb-3"></i>
+    <span class="text-red-400 font-bold px-6 text-center">${title}</span>
+    <span class="text-gray-500 text-[11px] px-8 text-center mt-1.5">${detail}</span>
+    <button id="retryBtn" class="mt-4 bg-white/10 hover:bg-white/20 text-white text-xs font-bold px-4 py-2 rounded-full">Coba Lagi</button>`;
   loadingMsg.classList.remove("opacity-0", "pointer-events-none");
   const retryBtn = document.getElementById("retryBtn");
   if (retryBtn) retryBtn.onclick = () => location.reload();
 }
 
-let db, messagesRef, connectedRef, typingRef, presenceRef;
+let db, messagesRef, connectedRef, typingRef, typingRootRef, presenceRef, presenceRootRef;
+let isFirebaseConnected = false;
+let currentUid = null;
 
 if (typeof firebase === "undefined") {
-  showFatalError("Gagal Memuat Sistem Chat", "Skrip Firebase tidak berhasil dimuat.");
+  showFatalError("Gagal Memuat Sistem Chat", "Skrip Firebase tidak berhasil dimuat. Periksa koneksi internet Anda lalu coba lagi.");
 } else {
   try {
     firebase.initializeApp(firebaseConfig);
+
+    // Anonymous Auth: wajib agar Firebase Rules yang aman dapat menerima request.
+    if (!firebase.auth || typeof firebase.auth !== "function") {
+      throw new Error("Firebase Auth SDK tidak dimuat");
+    }
+    await firebase.auth().signInAnonymously();
+    console.info("TChat Firebase Auth OK:", firebase.auth().currentUser.uid);
+
+    /*
+     * CONNECTION FIX
+     * Beberapa jaringan/operator seluler/proxy dapat membuat WebSocket
+     * Firebase RTDB macet di "Menghubungkan...". Firebase menyediakan
+     * forceLongPolling() untuk memaksa transport yang lebih kompatibel.
+     * Dipanggil sebelum ref/listener apa pun dibuat.
+     */
+    try {
+      if (firebase.database && firebase.database.INTERNAL &&
+          typeof firebase.database.INTERNAL.forceLongPolling === "function") {
+        firebase.database.INTERNAL.forceLongPolling();
+      }
+    } catch (transportErr) {
+      console.warn("TChat: long-polling fallback tidak tersedia:", transportErr);
+    }
+
     db = firebase.database();
-    messagesRef  = db.ref("messages");
-    connectedRef = db.ref(".info/connected");
-    typingRef    = db.ref("typing");
-    presenceRef  = db.ref("presence");
+    messagesRef    = db.ref("messages");
+    connectedRef   = db.ref(".info/connected");
+    typingRootRef  = db.ref("typing");
+    presenceRootRef= db.ref("presence");
+    const uid = firebase.auth().currentUser.uid;
+    currentUid = uid;
+    typingRef      = typingRootRef.child(uid);
+    presenceRef    = presenceRootRef.child(uid);
+
+    // Pastikan SDK mencoba konek lagi ketika browser kembali online.
+    window.addEventListener("online", () => {
+      try { db.goOnline(); } catch (e) {}
+      isFirebaseConnected = false;
+      renderConnectionState("connecting");
+    });
+
+    window.addEventListener("offline", () => {
+      isFirebaseConnected = false;
+      renderConnectionState("offline");
+    });
   } catch (err) {
-    showFatalError("Gagal Memuat Sistem Chat", "Terjadi kesalahan inisialisasi.");
+    console.error("TChat Firebase init error:", err);
+    sT("Gagal muat sistem.");
+    showFatalError("Gagal Memuat TChat", "Firebase/Auth gagal. Pastikan Anonymous Authentication aktif, Realtime Database sudah dibuat, dan databaseURL sesuai project.");
   }
 }
 
-// Auto-unlock agar tidak stuck loading
-setTimeout(() => {
-  if (!statusDot.classList.contains("bg-green-500")) {
-    statusDot.classList.replace("bg-red-500", "bg-green-500");
-    statusText.classList.replace("text-gray-500", "text-emerald-400");
-    messageInput.disabled = false;
-    sendBtn.disabled = false;
-    loadingMsg.classList.add("opacity-0", "pointer-events-none");
-    updateStatusText();
-  }
-}, 1500);
+// Connection watchdog: jangan biarkan UI berputar selamanya.
+let connectionWatchdog = null;
+if (db && connectedRef) {
+  connectionWatchdog = setTimeout(() => {
+    if (!isFirebaseConnected) {
+      if (navigator.onLine === false) {
+        showFatalError("Tidak Ada Koneksi Internet", "Perangkat sedang offline. Setelah internet aktif, tekan Coba Lagi.");
+      } else {
+        showFatalError(
+          "Koneksi Database Gagal",
+          "Firebase belum merespons. Coba jaringan lain atau periksa Firebase Realtime Database Rules."
+        );
+      }
+    }
+  }, 15000);
+}
 
+/* ---------- Identity ---------- */
 let myName = localStorage.getItem("tchat_name");
 if (!myName) {
   myName = "Anon-" + Math.floor(1000 + Math.random() * 9000);
@@ -260,70 +407,118 @@ userNameBadge.onclick = () => {
   }
 };
 
+/* ---------- Local draft ---------- */
+try {
+  const savedDraft = localStorage.getItem("tchat_draft") || "";
+  messageInput.value = savedDraft;
+  updateCharCount();
+} catch(e){}
+messageInput.addEventListener("input", () => {
+  try { localStorage.setItem("tchat_draft", messageInput.value); } catch(e){}
+});
+
+/* ---------- Connection status + presence ---------- */
 let presenceKey = null;
+let onlineCount = 0;
+
+let hasEverConnected = false;
+let reconnectTimer = null;
+
+function renderConnectionState(state){
+  statusDot.classList.remove("bg-red-500","bg-yellow-500","bg-green-500");
+  statusText.classList.remove("text-gray-400","text-gray-500","text-yellow-400","text-emerald-400");
+
+  if(state === "online"){
+    hasEverConnected = true;
+    statusDot.classList.add("bg-green-500");
+    statusText.classList.add("text-emerald-400");
+    // Keep connection text independent from the online-user counter.
+    statusText.textContent = "Online";
+    messageInput.disabled = false;
+    sendBtn.disabled = false;
+    loadingMsg.classList.add("opacity-0","pointer-events-none");
+    if(reconnectTimer){ clearTimeout(reconnectTimer); reconnectTimer=null; }
+  } else if(state === "offline"){
+    statusDot.classList.add("bg-red-500");
+    statusText.classList.add("text-gray-400");
+    statusText.textContent = "Offline";
+    messageInput.disabled = true;
+    sendBtn.disabled = true;
+  } else {
+    statusDot.classList.add("bg-yellow-500");
+    statusText.classList.add("text-yellow-400");
+    statusText.textContent = hasEverConnected ? "Menyambung ulang..." : "Menghubungkan...";
+    messageInput.disabled = true;
+    sendBtn.disabled = true;
+  }
+}
+
+function updateStatusText(){
+  if(isFirebaseConnected) renderConnectionState("online");
+}
+
 if (connectedRef) {
   connectedRef.on("value", (snap) => {
-    if (snap.val() === true) {
-      statusDot.classList.replace("bg-red-500", "bg-green-500");
-      statusText.classList.replace("text-gray-500", "text-emerald-400");
-      messageInput.disabled = false;
-      sendBtn.disabled = false;
-      loadingMsg.classList.add("opacity-0", "pointer-events-none");
+    const connected = snap.val() === true;
+    isFirebaseConnected = connected;
 
-      if (presenceRef && !presenceKey) {
-        const myPresence = presenceRef.push();
-        presenceKey = myPresence.key;
-        myPresence.onDisconnect().remove();
-        myPresence.set(true);
+    if (connected) {
+      if (connectionWatchdog) { clearTimeout(connectionWatchdog); connectionWatchdog = null; }
+      renderConnectionState("online");
+
+      if (presenceRef && !presenceKey && currentUid) {
+        presenceKey = currentUid;
+        presenceRef.onDisconnect().set({ online:false, lastSeen:firebase.database.ServerValue.TIMESTAMP }).catch(()=>{});
+        presenceRef.set({ online:true, lastSeen:firebase.database.ServerValue.TIMESTAMP }).catch(()=>{});
       }
     } else {
-      statusDot.classList.replace("bg-green-500", "bg-red-500");
-      statusText.classList.replace("text-emerald-400", "text-gray-500");
-      messageInput.disabled = true;
-      sendBtn.disabled = true;
       presenceKey = null;
+      renderConnectionState(navigator.onLine === false ? "offline" : "connecting");
     }
-    updateStatusText();
+  }, (err) => {
+    console.error("TChat connection listener error:", err);
+    isFirebaseConnected = false;
+    renderConnectionState("offline");
+    showFatalError("Tidak Bisa Terhubung ke Database","Akses ke Firebase ditolak atau database tidak tersedia. Periksa Rules dan URL Realtime Database.");
   });
 }
 
-let onlineCount = 0;
-if (presenceRef) {
-  presenceRef.on("value", (snap) => {
-    onlineCount = snap.numChildren();
-    updateStatusText();
+if (presenceRootRef) {
+  presenceRootRef.on("value", (snap) => {
+    let count = 0;
+    snap.forEach(child => { const v = child.val(); if(v && v.online === true) count++; });
+    onlineCount = count;
+    // Do not overwrite the connection state with the online-user counter.
+    // The counter can update independently while the connection remains Online.
   });
 }
-function updateStatusText(){
-  const online = statusDot.classList.contains("bg-green-500");
-  statusText.textContent = online
-    ? `Online${onlineCount ? " • " + onlineCount + " pengguna" : ""}`
-    : "Menghubungkan...";
-}
 
-let replyState = null;
+/* ---------- Reply state ---------- */
+let replyState = null; // {n: name, m: message}
 document.getElementById("closeReply").onclick = () => {
   replyState = null;
   replyBox.classList.add("hidden");
 };
-window.setReply = function(name, msg){
+function setReply(name, msg){
   replyState = { n: name, m: msg };
   replyTxt.textContent = "Balas " + name + ": " + (msg.length > 25 ? msg.substring(0, 25) + "..." : msg);
   replyBox.classList.remove("hidden");
   messageInput.focus();
 }
 
+/* ---------- Emoji buttons ---------- */
 document.querySelectorAll(".emj-btn").forEach(btn => {
   btn.onclick = () => { messageInput.value += btn.innerText; messageInput.focus(); updateCharCount(); };
 });
 
+/* ---------- Typing indicator ---------- */
 let typingLock = false;
 messageInput.oninput = () => {
   updateCharCount();
   if (!typingLock && typingRef) {
     typingLock = true;
-    typingRef.set({ name: myName, typing: true });
-    setTimeout(() => { typingLock = false; typingRef.set({ name: myName, typing: false }); }, 2000);
+    typingRef.set(true).catch(() => {});
+    setTimeout(() => { typingLock = false; typingRef.set(false).catch(() => {}); }, 2000);
   }
 };
 function updateCharCount(){
@@ -332,11 +527,14 @@ function updateCharCount(){
   charCount.classList.toggle("text-red-400", len >= 120);
   charCount.classList.toggle("text-gray-600", len < 120);
 }
-if (typingRef) {
-  typingRef.on("value", (snap) => {
-    const t = snap.val();
-    if (t && t.typing && t.name !== myName) {
-      typingIndicator.textContent = t.name + " sedang mengetik...";
+if (typingRootRef) {
+  typingRootRef.on("value", (snap) => {
+    let someoneTyping = false;
+    snap.forEach(child => {
+      if (child.key !== currentUid && child.val() === true) someoneTyping = true;
+    });
+    if (someoneTyping) {
+      typingIndicator.textContent = "Seseorang sedang mengetik...";
       typingIndicator.classList.remove("hidden");
     } else {
       typingIndicator.classList.add("hidden");
@@ -345,14 +543,30 @@ if (typingRef) {
   });
 }
 
+/* ---------- Safe text formatting (escapes HTML first, then applies limited markdown) ---------- */
+function safeUrl(url){
+  try { const u = new URL(url); return (u.protocol === "https:" || u.protocol === "http:") ? u.href : null; } catch(e){ return null; }
+}
+
+function mediaHtml(v){
+  if (!v || !v.url) return null;
+  const url = safeUrl(v.url);
+  if (!url) return null;
+  if (v.type === "image") return `<img src="${url.replace(/\"/g,"&quot;")}" class="message-media" loading="lazy" alt="Gambar" onerror="this.outerHTML='<span class=\"text-red-400 text-xs italic\">[Gambar gagal dimuat]</span>'">`;
+  if (v.type === "gift") return `<img src="${url.replace(/\"/g,"&quot;")}" class="gift-media" loading="lazy" alt="Gift" onerror="this.outerHTML='<span class=\"text-red-400 text-xs italic\">[Gift gagal dimuat]</span>'"><div class="media-caption">${(v.caption || "Gift").replace(/[&<>]/g,"")}</div>`;
+  return null;
+}
+
 function formatMessage(raw){
   const div = document.createElement("div");
   div.textContent = raw;
-  let html = div.innerHTML;
+  let html = div.innerHTML; // fully HTML-escaped at this point
 
+  // quoted reply block: "> Name | snippet"
   html = html.replace(/\n?&gt; (.*?) \| (.*?)\n/g,
     "<div class='border-l-[3px] border-[var(--thm-bg1)] pl-2 ml-1 my-1 text-[11px] bg-gray-900/40 rounded p-1.5 opacity-90 text-gray-300'><b>$1</b><br><span class='italic'>$2</span></div>");
 
+  // links / inline images
   html = html.replace(/(https?:\/\/[^\s]+)/g, (url) => {
     if (/\.(jpeg|jpg|gif|png|webp)$/i.test(url)) {
       return `<img src="${url}" class="mt-2 rounded-lg max-h-48 max-w-full object-cover border border-gray-600/50 shadow-md" loading="lazy" onload="sC()" onerror="this.outerHTML='&lt;span class=\\'text-red-400 text-xs italic\\'&gt;[Gambar Gagal]&lt;/span&gt;'.replace(/&lt;/g,'<').replace(/&gt;/g,'>')">`;
@@ -366,25 +580,29 @@ function formatMessage(raw){
   return html;
 }
 
-const msgStore = new Map();
+/* ---------- Message store (avoids ever embedding raw user text inside onclick="") ---------- */
+const msgStore = new Map(); // id -> {sender, text, type, url, caption}
+const localReactions = new Map(); // local-only UI reactions, no database write
+let rowSeq = 0;
 
-function renderMessage(id, sender, text, ts, isSystem = false){
+/* ---------- Render a message row ---------- */
+function renderMessage(id, sender, text, ts, isSystem = false, media = null){
   const isMe = sender === myName;
   const row = document.createElement("div");
   const nearBottom = chatBox.scrollHeight - chatBox.clientHeight <= chatBox.scrollTop + 80;
 
   row.className = `flex w-full msg-row msg-enter ${isMe || isSystem ? "justify-end" : "justify-start"} gap-2 ${isSystem ? "opacity-80 scale-95" : ""}`;
-  row.setAttribute("data-text", (sender + " " + text).toLowerCase());
+  row.setAttribute("data-text", (sender + " " + (text || "") + " " + (media?.caption || "")).toLowerCase());
   row.setAttribute("data-msg-id", id);
-  msgStore.set(id, { sender, text });
+  msgStore.set(id, { sender, text, type: media?.type || "text", url: media?.url || "", caption: media?.caption || "" });
 
   const time = (ts ? new Date(ts) : new Date()).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
   const avatar = isSystem ? "https://api.dicebear.com/7.x/bottts/svg?seed=System&backgroundColor=ef4444" : avatarUrl(sender);
-  const bodyHtml = formatMessage(text);
+  const bodyHtml = media ? (mediaHtml(media) || formatMessage(text || "")) : formatMessage(text || "");
 
   const nameLabel = document.createElement("span");
   nameLabel.className = "text-[10px] font-bold text-gray-500 mb-0.5 ml-1 drop-shadow-sm";
-  nameLabel.textContent = sender;
+  nameLabel.textContent = sender; // safe: textContent, not innerHTML
 
   const avatarImg = `<img src="${avatar}" class="w-8 h-8 rounded-full bg-gray-800 flex-shrink-0 mt-1 shadow-sm border border-gray-700">`;
 
@@ -396,6 +614,7 @@ function renderMessage(id, sender, text, ts, isSystem = false){
     </div>
     <span class="text-[9px] font-medium text-gray-600 mt-1 ${isMe || isSystem ? "mr-1" : "ml-1"} flex items-center gap-2">
       ${time}
+      ${isMe && !isSystem ? `<i class="fa-solid fa-check text-[8px] opacity-70" title="Terkirim"></i>` : ""}
       ${!isMe && !isSystem ? `<button data-action="reply" class="text-[var(--thm-bg1)] hover:text-white transition-colors" title="Balas"><i class="fa-solid fa-reply"></i></button>` : ""}
     </span>`;
   if (!isMe && !isSystem) bubble.prepend(nameLabel);
@@ -403,6 +622,40 @@ function renderMessage(id, sender, text, ts, isSystem = false){
   if (!isMe && !isSystem) row.insertAdjacentHTML("beforeend", avatarImg);
   row.appendChild(bubble);
   if (isMe || isSystem) row.insertAdjacentHTML("beforeend", avatarImg);
+
+  // Double-tap/click on a message opens a small local reaction picker.
+  let pressTimer = null;
+  bubble.style.position = "relative";
+  const openReactionPicker = () => {
+    const old = bubble.querySelector(".reaction-pop");
+    if(old) { old.remove(); return; }
+    const pop = document.createElement("div");
+    pop.className = "reaction-pop";
+    ["❤️","😂","👍","🔥","😮","😢"].forEach(emoji => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = emoji;
+      b.onclick = (ev) => {
+        ev.stopPropagation();
+        localReactions.set(id, emoji);
+        const oldBadge = bubble.querySelector(".local-reaction");
+        if(oldBadge) oldBadge.remove();
+        const badge = document.createElement("span");
+        badge.className = "local-reaction absolute -bottom-3 right-2 bg-gray-900 border border-white/10 rounded-full px-1.5 py-0.5 text-[11px] shadow";
+        badge.textContent = emoji;
+        bubble.appendChild(badge);
+        pop.remove();
+      };
+      pop.appendChild(b);
+    });
+    bubble.appendChild(pop);
+  };
+  bubble.addEventListener("dblclick", (ev) => { ev.stopPropagation(); openReactionPicker(); });
+  bubble.addEventListener("touchstart", () => {
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(openReactionPicker, 550);
+  }, {passive:true});
+  bubble.addEventListener("touchend", () => clearTimeout(pressTimer), {passive:true});
+  bubble.addEventListener("touchmove", () => clearTimeout(pressTimer), {passive:true});
 
   chatBox.insertBefore(row, scrollAnchor);
 
@@ -421,6 +674,7 @@ function renderMessage(id, sender, text, ts, isSystem = false){
   }
 }
 
+/* Event delegation: handles reply + copy without ever building onclick="" from user text */
 let unreadCount = 0;
 chatBox.addEventListener("click", (e) => {
   const actionEl = e.target.closest("[data-action]");
@@ -433,9 +687,9 @@ chatBox.addEventListener("click", (e) => {
 
   if (actionEl.dataset.action === "reply") {
     e.stopPropagation();
-    window.setReply(data.sender, data.text);
+    setReply(data.sender, data.text);
   } else if (actionEl.dataset.action === "copy") {
-    navigator.clipboard.writeText(data.text).then(() => window.sT("Pesan disalin!")).catch(() => {});
+    navigator.clipboard.writeText(data.text).then(() => sT("Pesan disalin!")).catch(() => {});
   }
 });
 
@@ -443,7 +697,7 @@ window.sC = function(){
   scrollAnchor.scrollIntoView({ behavior: "smooth", block: "end" });
 };
 function scrollToBottom(){
-  window.sC();
+  sC();
   unreadCount = 0;
   jumpBtn.classList.add("hidden");
   jumpBtn.classList.remove("flex");
@@ -454,16 +708,44 @@ chatBox.addEventListener("scroll", () => {
   if (nearBottom) { unreadCount = 0; jumpBtn.classList.add("hidden"); jumpBtn.classList.remove("flex"); }
 });
 
+/* ---------- In-page/browser notification ---------- */
+let notificationReady = false;
+function maybeRequestNotifications(){
+  if("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().then(p => { notificationReady = p === "granted"; }).catch(()=>{});
+  } else if("Notification" in window) notificationReady = Notification.permission === "granted";
+}
+userNameBadge.addEventListener("click", maybeRequestNotifications, {capture:true});
+
+/* ---------- Incoming messages ---------- */
 if (messagesRef) {
-  messagesRef.limitToLast(50).on("child_added", (snap) => {
+  messagesRef.limitToLast(100).on("child_added", (snap) => {
     loadingMsg.classList.add("opacity-0", "pointer-events-none");
     const v = snap.val();
-    if (v && v.text) renderMessage(snap.key, v.sender, v.text, v.timestamp);
+    if (v && (v.text || v.url)) {
+      const sender = v.name || "Anon";
+      const media = (v.type === "image" || v.type === "gift") ? {type:v.type, url:v.url || "", caption:v.caption || ""} : null;
+      renderMessage(snap.key, sender, v.text || "", v.timestamp, false, media);
+      if (document.hidden && sender !== myName && "Notification" in window && Notification.permission === "granted") {
+        try { new Notification(sender, { body: media ? (media.type === "gift" ? "🎁 Mengirim gift" : "🖼️ Mengirim gambar") : v.text.replace(/\s+/g," ").slice(0,120), icon: avatarUrl(sender) }); } catch(e) {}
+      }
+    }
   }, () => {
-    window.sT("Database Dikunci!");
+    sT("Database Dikunci!");
+    loadingMsg.innerHTML = "<i class='fa-solid fa-triangle-exclamation text-red-500 text-3xl mb-3'></i> <span class='text-red-400 font-bold'>Akses Ditolak</span>";
+    loadingMsg.classList.remove("opacity-0", "pointer-events-none");
   });
 }
 
+/* ---------- Keyboard shortcuts ---------- */
+messageInput.addEventListener("keydown", (e) => {
+  if(e.key === "Enter") {
+    e.preventDefault();
+    if(!sendBtn.disabled) messageForm.requestSubmit();
+  }
+});
+
+/* ---------- Profanity filter ---------- */
 const BAD_WORDS = ["anjing","babi","monyet","bangsat","kontol","memek","ngentot","goblok","tolol","fuck","shit","bitch","nigga","sex","porn","jancok","dancok","asu","bajingan","kampret","ngehe","titit","pantat","ngewe","pepek","peler","puki","sundala","telaso","gendeng","edan","bgst","gblk","dick","pussy","cock","boobs","tits","lonte","pelacur","jablay","s3x","fck","njing","bgsd","kntl"];
 function censor(text){
   let out = text;
@@ -471,13 +753,58 @@ function censor(text){
   return out;
 }
 
+/* ---------- Image / Gift sending ---------- */
+function openMedia(mode){
+  mediaModal.classList.add("show"); mediaModal.setAttribute("aria-hidden","false");
+  const isGift = mode === "gift";
+  mediaTitle.textContent = isGift ? "Kirim gift" : "Kirim gambar";
+  imagePanel.classList.toggle("hidden", isGift);
+  giftPanel.classList.toggle("hidden", !isGift);
+  if (!isGift) { imageUrlInput.value = ""; imagePreviewWrap.classList.add("hidden"); setTimeout(()=>imageUrlInput.focus(),50); }
+}
+function closeMedia(){ mediaModal.classList.remove("show"); mediaModal.setAttribute("aria-hidden","true"); }
+mediaClose.onclick = closeMedia;
+mediaModal.addEventListener("click", e => { if(e.target === mediaModal) closeMedia(); });
+imageBtn.onclick = () => openMedia("image");
+giftBtn.onclick = () => openMedia("gift");
+imageUrlInput.addEventListener("input", () => {
+  const url = safeUrl(imageUrlInput.value.trim());
+  if(url){ imagePreview.src=url; imagePreviewWrap.classList.remove("hidden"); }
+  else imagePreviewWrap.classList.add("hidden");
+});
+imagePreview.onerror = () => imagePreviewWrap.classList.add("hidden");
+function sendMedia(type, url, caption=""){
+  if(!firebase.auth().currentUser || !messagesRef) return sT("Belum terhubung.");
+  const clean = safeUrl(url);
+  if(!clean || clean.length > 500) return sT("Link tidak valid.");
+  if(Date.now() - lastSend < 1000) return sT("Tunggu 1 detik.");
+  const payload = { type, url: clean, caption: String(caption || "").slice(0,60), text: type === "gift" ? "🎁 Gift" : "🖼️ Gambar", name: myName, uid: firebase.auth().currentUser.uid, timestamp: firebase.database.ServerValue.TIMESTAMP };
+  messagesRef.push(payload).then(()=>{ lastSend=Date.now(); closeMedia(); }).catch(()=>sT("Gagal kirim media!"));
+}
+imageSendBtn.onclick = () => sendMedia("image", imageUrlInput.value.trim(), "Gambar");
+const GIFTS = [
+  ["🎁","Hadiah","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f381.svg"],
+  ["🌹","Mawar","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f339.svg"],
+  ["💎","Berlian","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f48e.svg"],
+  ["❤️","Cinta","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/2764.svg"],
+  ["🎂","Kue","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f382.svg"],
+  ["🧸","Boneka","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f9f8.svg"],
+  ["🏆","Trofi","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/1f3c6.svg"],
+  ["⭐","Bintang","https://cdn.jsdelivr.net/gh/twitter/twemoji@latest/assets/svg/2b50.svg"]
+];
+GIFTS.forEach(([emoji,name,url])=>{
+  const b=document.createElement("button"); b.type="button"; b.className="gift-item"; b.innerHTML=`<img src="${url}" alt="${name}"><div class="text-[10px] mt-1">${emoji} ${name}</div>`;
+  b.onclick=()=>sendMedia("gift",url,name); giftGrid.appendChild(b);
+});
+
+/* ---------- Sending ---------- */
 let lastSend = 0;
 updateCharCount();
 messageForm.onsubmit = (e) => {
   e.preventDefault();
   let text = messageInput.value.trim();
   if (text.length === 0) return;
-  if (Date.now() - lastSend < 1000) { window.sT("Tunggu 1 detik."); return; }
+  if (Date.now() - lastSend < 1000) { sT("Tunggu 1 detik."); return; }
 
   text = censor(text);
 
@@ -488,25 +815,38 @@ messageForm.onsubmit = (e) => {
     replyBox.classList.add("hidden");
   }
 
-  const payload = { sender: myName, text, timestamp: firebase.database.ServerValue.TIMESTAMP };
+  const payload = { type: "text", name: myName, uid: firebase.auth().currentUser.uid, text, timestamp: firebase.database.ServerValue.TIMESTAMP };
   messageInput.value = "";
+  try { localStorage.removeItem("tchat_draft"); } catch(e) {}
   updateCharCount();
   sendBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
 
   messagesRef.push(payload)
     .then(() => { lastSend = Date.now(); })
-    .catch(() => window.sT("Gagal kirim pesan!"))
+    .catch(() => sT("Gagal kirim pesan!"))
     .finally(() => {
       sendBtn.innerHTML = '<i class="fa-solid fa-paper-plane ml-[-2px] text-lg"></i>';
       messageInput.focus();
     });
 };
 
+/* ---------- V5 GitHub Pages / mobile optimizations ---------- */
+// Only the latest 100 messages are read/rendered. Old messages remain in Firebase
+// until server-side cleanup is configured. The browser is never granted delete access.
+const V5_CONFIG = Object.freeze({
+  maxLoadedMessages: 100,
+  messageMaxLength: 130,
+  mediaUrlMaxLength: 500,
+  githubPagesReady: true
+});
+try { localStorage.setItem("tchat_v5", "github-pages"); } catch(e) {}
+
+/* ---------- Welcome system message (local only, no DB write) ---------- */
 setTimeout(() => {
   renderMessage(
     "local-welcome-" + Date.now(),
     "⚙️ Sistem",
-    "Selamat datang di TChat versi Terbuka (Stable) 👋",
+    "Selamat datang di TChat 👋\n\nFitur yang tersedia:\n- Indikator sedang mengetik\n- Pencarian pesan\n- Jumlah pengguna online\n- Tombol lompat ke pesan terbaru",
     Date.now(),
     true
   );
