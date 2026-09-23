@@ -51,8 +51,18 @@
           </p>
         </div>
       </div>
-      <div id="userBadge" class="bg-blue-700 px-3 py-1 rounded-full text-xs font-medium border border-blue-500">
-        <!-- Nama anonim akan muncul di sini -->
+      
+      <!-- Tombol Tema Warna & Nama User -->
+      <div class="flex items-center gap-3 z-10">
+        <!-- Input Color disembunyikan, diwakilkan oleh icon label -->
+        <label for="bgColorPicker" class="cursor-pointer text-white hover:text-yellow-300 transition-colors" title="Ubah Warna Latar">
+          <i class="fa-solid fa-palette text-xl"></i>
+        </label>
+        <input type="color" id="bgColorPicker" class="absolute opacity-0 w-0 h-0 pointer-events-none" />
+        
+        <div id="userBadge" class="bg-blue-700 px-3 py-1 rounded-full text-xs font-medium border border-blue-500 shadow-sm">
+          <!-- Nama anonim akan muncul di sini -->
+        </div>
       </div>
     </header>
 
@@ -72,8 +82,9 @@
             type="text" 
             id="messageInput" 
             class="w-full bg-transparent outline-none text-sm py-1 placeholder-gray-500" 
-            placeholder="Ketik pesan anonim..." 
-            autocomplete="off" 
+            placeholder="Ketik pesan anonim (Max 200 huruf)..." 
+            autocomplete="off"
+            maxlength="200" 
             required 
           />
         </div>
@@ -90,23 +101,23 @@
   <!-- Menggunakan Firebase Modular SDK (V11) agar lebih ringan -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getDatabase, ref, push, onChildAdded, serverTimestamp, query, limitToLast } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+    import { getDatabase, ref, push, onChildAdded, serverTimestamp, query, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
-    // Konfigurasi Firebase Anda
     const firebaseConfig = {
-      apiKey: "AIzaSyBkvcyWuddpddsGmuC5M0w5mzm5v4AIErk",
-      authDomain: "tchatanonim.firebaseapp.com",
-      databaseURL: "https://tchat-83a53.firebaseio.com",
-      projectId: "tchat-83a53",
-      storageBucket: "tchat-83a53.appspot.com",
-      messagingSenderId: "679108429003",
-      appId: "1:679108429003:web:271e5b94ceae3fddeb074e"
+      apiKey: "AIzaSyDUh0iYMbtFcxSGiI52F0uf8_nLALdd840",
+      authDomain: "tchat-fe977.firebaseapp.com",
+      databaseURL: "https://tchat-fe977-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "tchat-fe977",
+      storageBucket: "tchat-fe977.firebasestorage.app",
+      messagingSenderId: "448447047829",
+      appId: "1:448447047829:web:1a8f01ce6b393c02a3139c"
     };
 
     // Inisialisasi Firebase
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     const messagesRef = ref(db, 'messages');
+    const connectedRef = ref(db, '.info/connected'); // Tambahan referensi koneksi
     
     // BUG FIX 1: Hanya mengambil 50 pesan terakhir agar chat tidak lag saat data di database sudah menumpuk
     const recentMessagesQuery = query(messagesRef, limitToLast(50));
@@ -118,6 +129,24 @@
     const loadingText = document.getElementById('loading');
     const userBadge = document.getElementById('userBadge');
     const sendBtn = document.getElementById('sendBtn');
+    const bgColorPicker = document.getElementById('bgColorPicker');
+
+    // --- FITUR: WARNA BACKGROUND ---
+    // Mengambil warna dari memori HP/Browser jika ada, defaultnya abu-abu muda
+    const savedBgColor = localStorage.getItem('tchat_bgColor') || '#f3f4f6'; 
+    document.body.style.backgroundColor = savedBgColor;
+    bgColorPicker.value = savedBgColor;
+
+    // Ketika user memilih warna baru di palet
+    bgColorPicker.addEventListener('input', (e) => {
+      const selectedColor = e.target.value;
+      document.body.style.backgroundColor = selectedColor; // Ubah background
+      localStorage.setItem('tchat_bgColor', selectedColor); // Simpan permanen
+    });
+
+    // --- FITUR: KEAMANAN ANTI-SPAM ---
+    let lastMessageTime = 0; // Waktu terakhir mengirim pesan
+    const COOLDOWN_MS = 2000; // Wajib tunggu 2 detik antar pesan
 
     // BUG FIX 3: Menghasilkan dan menyimpan nama Anonim secara persisten (localStorage)
     let myUsername = localStorage.getItem('tchat_username');
@@ -128,7 +157,18 @@
     }
     userBadge.textContent = myUsername;
 
-    let isFirstMessage = true;
+    // Memantau status koneksi secara real (Mengatasi bug stuck jika database kosong)
+    onValue(connectedRef, (snap) => {
+      if (snap.val() === true) {
+        // Jika terhubung, sembunyikan loading. Layar akan kosong siap dichat.
+        loadingText.style.display = 'none';
+      } else {
+        // Jika putus/sedang loading
+        loadingText.style.display = 'block';
+        loadingText.textContent = "Menghubungkan ke server...";
+        loadingText.className = "text-center text-gray-400 text-sm mt-4";
+      }
+    });
 
     // Fungsi untuk memformat waktu (HH:MM)
     function formatTime(timestamp) {
@@ -144,11 +184,6 @@
 
     // Mendengarkan pesan baru secara real-time
     onChildAdded(recentMessagesQuery, (snapshot) => {
-      if (isFirstMessage) {
-        loadingText.style.display = 'none'; // Sembunyikan tulisan loading
-        isFirstMessage = false;
-      }
-
       const data = snapshot.val();
       const isMine = data.sender === myUsername;
       const timeString = formatTime(data.timestamp);
@@ -200,6 +235,7 @@
     }, (error) => {
       // Peringatan jika aturan (Rules) Firebase belum diset menjadi public
       console.error("Error Realtime DB:", error);
+      loadingText.style.display = 'block';
       loadingText.textContent = "Akses Ditolak. Pastikan Rules Realtime Database diset ke '.read': true, '.write': true";
       loadingText.className = "text-center text-red-500 text-sm mt-4 font-semibold px-4";
     });
@@ -207,8 +243,24 @@
     // Mengirim pesan
     messageForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      
+      // PROTEKSI 1: Cek Anti Spam
+      const now = Date.now();
+      if (now - lastMessageTime < COOLDOWN_MS) {
+        const errorMsg = document.createElement('div');
+        errorMsg.className = 'text-center text-xs text-orange-500 my-2 font-semibold transition-opacity duration-300';
+        errorMsg.textContent = 'Sistem Anti-Spam: Tunggu 2 detik untuk mengirim lagi.';
+        messagesArea.appendChild(errorMsg);
+        messagesArea.scrollTop = messagesArea.scrollHeight;
+        
+        // Hapus notifikasi setelah 2 detik
+        setTimeout(() => errorMsg.remove(), 2000);
+        return; // Batalkan pengiriman
+      }
+
       const text = messageInput.value.trim();
       
+      // PROTEKSI 2: Mencegah text kosong atau diakali spasi
       if (text !== '') {
         // Kunci input sementara proses kirim
         sendBtn.disabled = true;
@@ -220,6 +272,8 @@
             sender: myUsername,
             timestamp: serverTimestamp() // Menggunakan waktu dari server Firebase
           });
+          
+          lastMessageTime = Date.now(); // Catat waktu sukses kirim untuk Anti-Spam
           messageInput.value = '';
         } catch (error) {
           console.error("Gagal mengirim pesan:", error);
