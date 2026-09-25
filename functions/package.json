@@ -1,0 +1,10 @@
+{
+  "name": "tchat-v5-1-functions",
+  "description": "TChat V5.1 scheduled cleanup",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0"
+  }
+}
